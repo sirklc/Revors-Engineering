@@ -155,6 +155,7 @@ Otomatik oluşturulan kurallar:
 3. **Sandbox**: Malware analysis için dedicated sandbox kullanın
 4. **Backup**: Sistem snapshot'ı alın
 5. **Legal**: Bu araçlar sadece güvenlik araştırması için kullanılmalıdır
+6. **İllegal**: Bu araçlar farklı bir durumda kullanıldığı taktirde hiçbir şekilde sorumluluk kabul edilmemektedir.
 
 ## 📖 Örnek Workflow
 
