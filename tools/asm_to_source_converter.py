@@ -1,0 +1,421 @@
+#!/usr/bin/env python3
+"""
+Assembly to Source Code Converter
+.asm dosyalarını Python, C++, C# vb. kaynak koduna çevirir
+"""
+
+import os
+import sys
+import re
+from pathlib import Path
+from tools.language_detector import LanguageDetector
+
+class AssemblyToSourceConverter:
+    def __init__(self, asm_file_path, target_language=None):
+        self.asm_file_path = asm_file_path
+        self.target_language = target_language
+        self.asm_instructions = []
+        self.functions = []
+        self.strings = []
+        self.variables = []
+        
+    def load_assembly_file(self):
+        """Assembly dosyasını yükle ve parse et"""
+        try:
+            with open(self.asm_file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Assembly instruction'larını parse et
+            lines = content.split('\n')
+            for line in lines:
+                line = line.strip()
+                if not line or line.startswith(';'):
+                    continue
+                
+                # Address, bytes, mnemonic, operands parse et
+                match = re.match(r'0x([0-9a-fA-F]+):\s+([0-9a-fA-F\s]+)\s+(\w+)(?:\s+(.+))?', line)
+                if match:
+                    address = match.group(1)
+                    bytes_hex = match.group(2)
+                    mnemonic = match.group(3)
+                    operands = match.group(4) or ""
+                    
+                    self.asm_instructions.append({
+                        'address': address,
+                        'bytes': bytes_hex.strip(),
+                        'mnemonic': mnemonic,
+                        'operands': operands.strip(),
+                        'original_line': line
+                    })
+            
+            return True
+        except Exception as e:
+            print(f"Assembly dosyası yüklenemedi: {e}")
+            return False
+    
+    def detect_target_language(self):
+        """Hedef dili tespit et"""
+        if self.target_language:
+            return self.target_language
+        
+        # Assembly dosyasının yanındaki original executable'ı bul
+        asm_dir = Path(self.asm_file_path).parent
+        exe_files = list(asm_dir.glob("*.exe"))
+        
+        if exe_files:
+            # Language detector ile tespit et
+            detector = LanguageDetector(str(exe_files[0]))
+            result = detector.analyze()
+            if result and result['confidence'] > 30:
+                return result['primary_language']
+        
+        # Default olarak C++ kullan
+        return "C/C++"
+    
+    def analyze_assembly_patterns(self):
+        """Assembly pattern'lerini analiz et"""
+        # Function boundaries tespit et
+        current_function = None
+        
+        for i, instruction in enumerate(self.asm_instructions):
+            mnemonic = instruction['mnemonic'].lower()
+            operands = instruction['operands']
+            
+            # Function start detection
+            if mnemonic == 'push' and 'ebp' in operands.lower():
+                if i + 1 < len(self.asm_instructions):
+                    next_inst = self.asm_instructions[i + 1]
+                    if next_inst['mnemonic'].lower() == 'mov' and 'ebp' in next_inst['operands']:
+                        # Function prologue detected
+                        current_function = {
+                            'start_address': instruction['address'],
+                            'instructions': [instruction],
+                            'name': f"func_{instruction['address']}"
+                        }
+            
+            # Function end detection
+            elif mnemonic == 'ret' and current_function:
+                current_function['instructions'].append(instruction)
+                current_function['end_address'] = instruction['address']
+                self.functions.append(current_function)
+                current_function = None
+            
+            # Add to current function
+            elif current_function:
+                current_function['instructions'].append(instruction)
+        
+        # String patterns
+        for instruction in self.asm_instructions:
+            if 'mov' in instruction['mnemonic'].lower():
+                # Look for string references
+                if re.search(r'0x[0-9a-fA-F]+', instruction['operands']):
+                    self.strings.append(instruction['operands'])
+    
+    def convert_to_python(self):
+        """Python koduna çevir"""
+        file_base = Path(self.asm_file_path).stem.replace('_', '').replace('.asm', '')
+        output_file = self.asm_file_path.replace('.asm', '_converted.py')
+        
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write("#!/usr/bin/env python3\n")
+            f.write('"""\n')
+            f.write(f"Converted Python code from {Path(self.asm_file_path).name}\n")
+            f.write("Auto-generated by Assembly to Source Converter\n")
+            f.write('"""\n\n')
+            
+            # Imports
+            f.write("import sys\n")
+            f.write("import os\n")
+            f.write("import struct\n\n")
+            
+            # Convert functions
+            if self.functions:
+                for func in self.functions:
+                    f.write(f"def {func['name']}():\n")
+                    f.write(f'    """Function converted from assembly at 0x{func["start_address"]}"""\n')
+                    
+                    # Convert assembly instructions to Python-like pseudocode
+                    for inst in func['instructions']:
+                        mnemonic = inst['mnemonic'].lower()
+                        operands = inst['operands']
+                        
+                        if mnemonic == 'push':
+                            f.write(f"    # push {operands}\n")
+                        elif mnemonic == 'pop':
+                            f.write(f"    # pop {operands}\n")
+                        elif mnemonic == 'mov':
+                            if ',' in operands:
+                                dst, src = operands.split(',', 1)
+                                f.write(f"    {dst.strip()} = {src.strip()}  # mov instruction\n")
+                        elif mnemonic == 'call':
+                            func_name = operands.strip()
+                            if func_name.startswith('0x'):
+                                f.write(f"    call_function_at_{func_name[2:]}()\n")
+                            else:
+                                f.write(f"    {func_name}()\n")
+                        elif mnemonic == 'ret':
+                            f.write(f"    return\n")
+                        else:
+                            f.write(f"    # {inst['original_line']}\n")
+                    
+                    f.write("\n")
+            
+            # Main execution
+            f.write('if __name__ == "__main__":\n')
+            f.write('    print("Converted Python program started")\n')
+            if self.functions:
+                f.write(f'    {self.functions[0]["name"]}()  # Call first function\n')
+            f.write('    print("Program completed")\n')
+        
+        return output_file
+    
+    def convert_to_cpp(self):
+        """C++ koduna çevir"""
+        output_file = self.asm_file_path.replace('.asm', '_converted.cpp')
+        
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write("/*\n")
+            f.write(f" * Converted C++ code from {Path(self.asm_file_path).name}\n")
+            f.write(" * Auto-generated by Assembly to Source Converter\n")
+            f.write(" */\n\n")
+            
+            # Headers
+            f.write("#include <iostream>\n")
+            f.write("#include <windows.h>\n")
+            f.write("#include <cstdint>\n\n")
+            f.write("using namespace std;\n\n")
+            
+            # Function declarations
+            if self.functions:
+                for func in self.functions:
+                    f.write(f"void {func['name']}();\n")
+                f.write("\n")
+            
+            # Function implementations
+            if self.functions:
+                for func in self.functions:
+                    f.write(f"void {func['name']}() {{\n")
+                    f.write(f"    // Function converted from assembly at 0x{func['start_address']}\n")
+                    
+                    # Convert assembly to C++
+                    for inst in func['instructions']:
+                        mnemonic = inst['mnemonic'].lower()
+                        operands = inst['operands']
+                        
+                        if mnemonic == 'push':
+                            f.write(f"    // push {operands}\n")
+                        elif mnemonic == 'pop':
+                            f.write(f"    // pop {operands}\n")
+                        elif mnemonic == 'mov':
+                            if ',' in operands:
+                                dst, src = operands.split(',', 1)
+                                f.write(f"    // {dst.strip()} = {src.strip()}; // mov instruction\n")
+                        elif mnemonic == 'call':
+                            func_name = operands.strip()
+                            if func_name.startswith('0x'):
+                                f.write(f"    // call_function_at_{func_name[2:]}();\n")
+                            else:
+                                f.write(f"    // {func_name}();\n")
+                        elif mnemonic == 'ret':
+                            f.write(f"    return;\n")
+                        else:
+                            f.write(f"    // {inst['original_line']}\n")
+                    
+                    f.write("}\n\n")
+            
+            # Main function
+            f.write("int main(int argc, char* argv[]) {\n")
+            f.write("    cout << \"Converted C++ program started\" << endl;\n")
+            f.write("    \n")
+            if self.functions:
+                f.write(f"    {self.functions[0]['name']}();  // Call first function\n")
+            f.write("    \n")
+            f.write("    cout << \"Program completed\" << endl;\n")
+            f.write("    return 0;\n")
+            f.write("}\n")
+        
+        return output_file
+    
+    def convert_to_csharp(self):
+        """C# koduna çevir"""
+        output_file = self.asm_file_path.replace('.asm', '_converted.cs')
+        
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write("/*\n")
+            f.write(f" * Converted C# code from {Path(self.asm_file_path).name}\n")
+            f.write(" * Auto-generated by Assembly to Source Converter\n")
+            f.write(" */\n\n")
+            
+            # Using statements
+            f.write("using System;\n")
+            f.write("using System.Runtime.InteropServices;\n\n")
+            
+            # Namespace and class
+            class_name = Path(self.asm_file_path).stem.replace('_', '').title()
+            f.write(f"namespace ConvertedCode\n{{\n")
+            f.write(f"    public class {class_name}\n    {{\n")
+            
+            # Convert functions
+            if self.functions:
+                for func in self.functions:
+                    f.write(f"        public static void {func['name'].title()}()\n")
+                    f.write("        {\n")
+                    f.write(f"            // Function converted from assembly at 0x{func['start_address']}\n")
+                    
+                    # Convert assembly to C#
+                    for inst in func['instructions']:
+                        mnemonic = inst['mnemonic'].lower()
+                        operands = inst['operands']
+                        
+                        if mnemonic == 'call':
+                            func_name = operands.strip()
+                            if not func_name.startswith('0x'):
+                                f.write(f"            // {func_name}();\n")
+                        elif mnemonic == 'ret':
+                            f.write(f"            return;\n")
+                        else:
+                            f.write(f"            // {inst['original_line']}\n")
+                    
+                    f.write("        }\n\n")
+            
+            # Main method
+            f.write("        public static void Main(string[] args)\n")
+            f.write("        {\n")
+            f.write("            Console.WriteLine(\"Converted C# program started\");\n")
+            f.write("            \n")
+            if self.functions:
+                f.write(f"            {self.functions[0]['name'].title()}();  // Call first function\n")
+            f.write("            \n")
+            f.write("            Console.WriteLine(\"Program completed\");\n")
+            f.write("        }\n")
+            f.write("    }\n")
+            f.write("}\n")
+        
+        return output_file
+    
+    def convert(self):
+        """Ana conversion fonksiyonu"""
+        print(f"🔄 ASSEMBLY TO SOURCE CONVERSION")
+        print("=" * 50)
+        print(f"📁 Input: {Path(self.asm_file_path).name}")
+        
+        if not self.load_assembly_file():
+            return None
+        
+        print(f"📋 Loaded {len(self.asm_instructions)} assembly instructions")
+        
+        # Pattern analysis
+        self.analyze_assembly_patterns()
+        print(f"🔍 Detected {len(self.functions)} functions")
+        
+        # Language detection
+        target_lang = self.detect_target_language()
+        print(f"🎯 Target language: {target_lang}")
+        
+        # Convert based on language
+        output_files = []
+        
+        try:
+            if 'Python' in target_lang:
+                py_file = self.convert_to_python()
+                output_files.append(py_file)
+                print(f"✅ Python conversion: {Path(py_file).name}")
+            
+            if 'C++' in target_lang or 'C/' in target_lang:
+                cpp_file = self.convert_to_cpp()
+                output_files.append(cpp_file)
+                print(f"✅ C++ conversion: {Path(cpp_file).name}")
+            
+            if '.NET' in target_lang or 'C#' in target_lang:
+                cs_file = self.convert_to_csharp()
+                output_files.append(cs_file)
+                print(f"✅ C# conversion: {Path(cs_file).name}")
+            
+            # If no specific match, create all formats
+            if not output_files:
+                print(f"🔄 Creating multiple format outputs...")
+                py_file = self.convert_to_python()
+                cpp_file = self.convert_to_cpp()
+                output_files = [py_file, cpp_file]
+                print(f"✅ Multi-format conversion completed")
+        
+        except Exception as e:
+            print(f"❌ Conversion error: {e}")
+            return None
+        
+        print(f"\n🎉 Conversion completed!")
+        print(f"📂 Generated {len(output_files)} source files:")
+        for file_path in output_files:
+            print(f"   - {Path(file_path).name}")
+        
+        return output_files
+
+def convert_all_asm_files(directory):
+    """Bir dizindeki tüm .asm dosyalarını çevir"""
+    asm_files = list(Path(directory).glob("*.asm"))
+    
+    if not asm_files:
+        print(f"❌ No .asm files found in {directory}")
+        return []
+    
+    print(f"🔍 Found {len(asm_files)} assembly files")
+    
+    all_converted = []
+    for asm_file in asm_files:
+        print(f"\n{'='*20}")
+        converter = AssemblyToSourceConverter(str(asm_file))
+        converted_files = converter.convert()
+        if converted_files:
+            all_converted.extend(converted_files)
+    
+    return all_converted
+
+def main():
+    if len(sys.argv) < 2:
+        print("Kullanım:")
+        print("  python asm_to_source_converter.py <asm_file>")
+        print("  python asm_to_source_converter.py <directory>  # Tüm .asm dosyalarını çevir")
+        print("\nÖrnekler:")
+        print("  python asm_to_source_converter.py program.asm")
+        print("  python asm_to_source_converter.py extracted/source_code/")
+        print("\nÇevrilebilir diller:")
+        print("  🐍 Python (.py)")
+        print("  ⚡ C++ (.cpp)")
+        print("  🔷 C# (.cs)")
+        sys.exit(1)
+    
+    input_path = sys.argv[1]
+    
+    if not os.path.exists(input_path):
+        print(f"❌ Path not found: {input_path}")
+        sys.exit(1)
+    
+    if os.path.isfile(input_path):
+        # Single file conversion
+        if not input_path.endswith('.asm'):
+            print(f"❌ Not an assembly file: {input_path}")
+            sys.exit(1)
+        
+        converter = AssemblyToSourceConverter(input_path)
+        result = converter.convert()
+        
+        if result:
+            print(f"\n🎯 SUCCESS! Generated source code files:")
+            for file_path in result:
+                print(f"   📄 {file_path}")
+        else:
+            print(f"\n❌ Conversion failed")
+    
+    elif os.path.isdir(input_path):
+        # Directory batch conversion
+        results = convert_all_asm_files(input_path)
+        
+        if results:
+            print(f"\n🎯 BATCH CONVERSION SUCCESS!")
+            print(f"📊 Total files generated: {len(results)}")
+            print(f"📂 Check directory: {input_path}")
+        else:
+            print(f"\n❌ No files converted")
+
+if __name__ == "__main__":
+    main()
