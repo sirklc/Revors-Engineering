@@ -1,0 +1,39 @@
+# Advanced Reverse Engineering Toolkit Requirements
+
+# Web Framework
+Flask==2.3.3
+Werkzeug==2.3.7
+
+# PE Analysis
+pefile==2023.2.7
+
+# Disassembly Engine
+capstone==5.0.1
+
+# YARA Rules
+yara-python==4.3.1
+
+# Cryptography
+cryptography==41.0.7
+pyOpenSSL==23.3.0
+
+# Utilities
+requests==2.31.0
+colorama==0.4.6
+pathlib2==2.3.7
+
+# Mathematical operations
+numpy==1.24.4
+
+# Development and Testing
+pytest==7.4.3
+black==23.9.1
+flake8==6.1.0
+
+# Optional: Enhanced disassembly
+# keystone-engine==0.9.2
+# unicorn==2.0.1
+
+# Optional: Binary analysis
+# lief==0.13.2
+# r2pipe==1.8.0

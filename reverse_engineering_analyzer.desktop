@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Reverse Engineering Analyzer
+Comment=Advanced malware analysis and reverse engineering toolkit
+Exec=gnome-terminal --working-directory="/home/sirklc/Desktop/Revors Engineering" --title="RE Analyzer" -- python3 re_analyzer.py
+Icon=applications-debugging
+Terminal=false
+Categories=Development;Security;
+StartupNotify=true
+StartupWMClass=reverse-engineering-analyzer
